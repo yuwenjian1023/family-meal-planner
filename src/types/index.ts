@@ -76,8 +76,8 @@ export interface ShoppingListItem {
 // 自定义菜谱输入（不含 id/time 等自动字段）
 export interface CustomRecipeInput {
   name: string;
-  category: string;
-  type: string;
+  category: string;       // 一级分类名称
+  type: string;            // 二级分类名称
   flavor: string;
   ingredients: Ingredient[];
   steps: string[];
@@ -86,6 +86,7 @@ export interface CustomRecipeInput {
   difficulty: '简单' | '中等' | '困难';
   servings: number;
   imageUrl?: string;
+  subcategoryId?: string;  // 二级分类 UUID（关联 recipe_categories 表）
 }
 
 // 完整自定义菜谱（含 id/时间）

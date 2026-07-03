@@ -1,27 +1,77 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
-import { allRecipes as recipes } from '../data/recipes'
 import { Recipe } from '../types'
-import { SlidersHorizontal, Grid, List, Search, Heart, Plus, ChefHat } from 'lucide-react'
-import { getRecipeEmoji, getRecipeGradient } from '../utils/recipeVisuals'
+import { SlidersHorizontal, Grid, List, Search, Heart, Plus, ChefHat, Loader, ChevronDown, ChevronUp } from 'lucide-react'
+import { getRecipeEmoji, getRecipeGradient, cleanRecipeName } from '../utils/recipeVisuals'
 import { useFavoritesStore } from '../stores/favoritesStore'
 import { useCustomRecipeStore } from '../stores/customRecipeStore'
+import { fetchAllRecipes, fetchAllCategories } from '../lib/api'
+import type { RecipeCategory } from '../lib/api'
+
+interface CategoryNode {
+  id: string
+  name: string
+  children: CategoryNode[]
+}
 
 export default function RecipeListPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const activeTab = searchParams.get('tab') || 'all'
 
-  const [selectedCategory, setSelectedCategory] = useState<string>('全部')
-  const [selectedType, setSelectedType] = useState<string>('全部')
-  const [selectedFlavor, setSelectedFlavor] = useState<string>('全部')
+  const [selectedCategory, setSelectedCategory] = useState<string>('热门专题')
+  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<string>('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [searchText, setSearchText] = useState('')
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [dbRecipes, setDbRecipes] = useState<Recipe[]>([])
+
+  // 数据库分类树
+  const [categoryTree, setCategoryTree] = useState<CategoryNode[]>([])
+  const [loadingCategories, setLoadingCategories] = useState(true)
+  const [expandedSubcats, setExpandedSubcats] = useState(false)
 
   const { isFavorite } = useFavoritesStore()
   const favoritesCount = useFavoritesStore(state => state.ids.length)
   const customRecipes = useCustomRecipeStore(state => state.recipes)
+
+  // 从数据库加载食谱
+  useEffect(() => {
+    async function loadRecipes() {
+      setIsLoading(true)
+      const recipes = await fetchAllRecipes()
+      setDbRecipes(recipes)
+      setIsLoading(false)
+    }
+    loadRecipes()
+  }, [])
+
+  // 从数据库加载分类
+  useEffect(() => {
+    let mounted = true
+    fetchAllCategories().then((cats: RecipeCategory[]) => {
+      if (!mounted) return
+      const parents = cats.filter(c => !c.parent_id).sort((a, b) => a.sort_order - b.sort_order)
+      // 热门专题排最前，其余按 sort_order
+      const sorted = [...parents].sort((a, b) => {
+        if (a.name === '热门专题') return -1
+        if (b.name === '热门专题') return 1
+        return a.sort_order - b.sort_order
+      })
+      const tree: CategoryNode[] = sorted.map(p => ({
+        id: p.id,
+        name: p.name,
+        children: cats
+          .filter(c => c.parent_id === p.id)
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map(c => ({ id: c.id, name: c.name, children: [] })),
+      }))
+      setCategoryTree(tree)
+      setLoadingCategories(false)
+    })
+    return () => { mounted = false }
+  }, [])
 
   // 将 CustomRecipe 转换为 Recipe 格式
   const customAsRecipes: Recipe[] = useMemo(() =>
@@ -42,16 +92,43 @@ export default function RecipeListPage() {
   [customRecipes])
 
   // 根据 tab 选择数据源
-  const allRecipes = activeTab === 'custom' ? customAsRecipes : [...recipes, ...customAsRecipes]
+  const allRecipes = activeTab === 'custom' ? customAsRecipes : [...dbRecipes, ...customAsRecipes]
 
-  const categories = ['全部', ...new Set(allRecipes.map(r => r.category))]
-  const types = ['全部', ...new Set(allRecipes.map(r => r.type))]
-  const flavors = ['全部', ...new Set(allRecipes.map(r => r.flavor))]
+  // 当前选中一级分类下的二级分类
+  const currentChildren = useMemo(() => {
+    const parent = categoryTree.find(p => p.name === selectedCategory)
+    return parent?.children || []
+  }, [categoryTree, selectedCategory])
 
   const filteredRecipes = allRecipes.filter(recipe => {
-    if (selectedCategory !== '全部' && recipe.category !== selectedCategory) return false
-    if (selectedType !== '全部' && recipe.type !== selectedType) return false
-    if (selectedFlavor !== '全部' && recipe.flavor !== selectedFlavor) return false
+    const isCustomRecipe = customRecipes.some(cr => cr.id === recipe.id)
+
+    // 一级分类筛选
+    if (isCustomRecipe) {
+      const cr = customRecipes.find(c => c.id === recipe.id)!
+      // 自定义菜谱：category 匹配一级分类 或 subcategoryId 属于当前一级分类
+      if (cr.category !== selectedCategory) {
+        if (!cr.subcategoryId || !currentChildren.some(cc => cc.id === cr.subcategoryId)) return false
+      }
+    } else {
+      // 数据库食谱：category 字段匹配一级分类名称
+      if (recipe.category !== selectedCategory) return false
+    }
+
+    // 二级分类筛选
+    if (selectedSubcategoryId) {
+      const selectedSub = currentChildren.find(cc => cc.id === selectedSubcategoryId)
+      const subName = selectedSub?.name
+
+      if (isCustomRecipe) {
+        const cr = customRecipes.find(c => c.id === recipe.id)!
+        if (cr.subcategoryId !== selectedSubcategoryId) return false
+      } else {
+        // 数据库食谱：recipe.type 存储的就是二级分类名称（如"家常菜"）
+        if (!subName || recipe.type !== subName) return false
+      }
+    }
+
     if (searchText && !recipe.name.includes(searchText) && !recipe.category.includes(searchText)) return false
     if (showFavoritesOnly && !isFavorite(recipe.id)) return false
     return true
@@ -59,6 +136,15 @@ export default function RecipeListPage() {
 
   // 判断是否为自定义菜谱（id 不在预设列表中）
   const isCustom = (id: string) => customRecipes.some(cr => cr.id === id)
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader size={40} className="text-primary-500 animate-spin mb-4" />
+        <p className="text-neutral-500">正在加载食谱...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -139,50 +225,58 @@ export default function RecipeListPage() {
           {showFavoritesOnly ? `已收藏 (${favoritesCount})` : '仅看收藏'}
         </button>
 
-        <div>
-          <h3 className="text-sm font-medium text-neutral-600 mb-3">菜系</h3>
-          <div className="flex flex-wrap gap-2">
-            {categories.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={selectedCategory === cat ? 'tag-active' : 'tag'}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* 分类筛选：一级分类标签行 + 当前分类的二级子标签 */}
+        {loadingCategories ? (
+          <div className="text-sm text-neutral-400">分类加载中...</div>
+        ) : (
+          <div className="space-y-4">
+            {/* 一级分类：紧凑标签行 */}
+            <div className="flex flex-wrap gap-2">
+              {categoryTree.map(cat => (
+                <button
+                  key={cat.id}
+                  onClick={() => { setSelectedCategory(cat.name); setSelectedSubcategoryId(''); setExpandedSubcats(false) }}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
+                    selectedCategory === cat.name
+                      ? 'bg-primary-500 text-white shadow-sm'
+                      : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                  }`}
+                >
+                  {cat.name}
+                </button>
+              ))}
+            </div>
 
-        <div>
-          <h3 className="text-sm font-medium text-neutral-600 mb-3">种类</h3>
-          <div className="flex flex-wrap gap-2">
-            {types.map(type => (
-              <button
-                key={type}
-                onClick={() => setSelectedType(type)}
-                className={selectedType === type ? 'tag-active' : 'tag'}
-              >
-                {type}
-              </button>
-            ))}
+            {/* 二级子分类：带分隔线和展开/收起 */}
+            {currentChildren.length > 0 && (
+              <div className="border-t border-neutral-100 pt-4">
+                <div className="flex flex-wrap gap-2 items-center">
+                  {(expandedSubcats ? currentChildren : currentChildren.slice(0, 10)).map(sub => (
+                    <button
+                      key={sub.id}
+                      onClick={() => setSelectedSubcategoryId(selectedSubcategoryId === sub.id ? '' : sub.id)}
+                      className={selectedSubcategoryId === sub.id ? 'tag-active' : 'tag'}
+                    >
+                      {sub.name}
+                    </button>
+                  ))}
+                  {currentChildren.length > 10 && (
+                    <button
+                      onClick={() => setExpandedSubcats(!expandedSubcats)}
+                      className="flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium text-primary-500 bg-primary-50 hover:bg-primary-100 transition-colors"
+                    >
+                      {expandedSubcats ? (
+                        <><ChevronUp size={14} />收起</>
+                      ) : (
+                        <><ChevronDown size={14} />展开全部 ({currentChildren.length})</>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-
-        <div>
-          <h3 className="text-sm font-medium text-neutral-600 mb-3">口味</h3>
-          <div className="flex flex-wrap gap-2">
-            {flavors.map(flavor => (
-              <button
-                key={flavor}
-                onClick={() => setSelectedFlavor(flavor)}
-                className={selectedFlavor === flavor ? 'tag-active' : 'tag'}
-              >
-                {flavor}
-              </button>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
 
       {/* 菜谱列表 */}
@@ -224,8 +318,10 @@ export default function RecipeListPage() {
 
 // 网格视图卡片
 function RecipeCard({ recipe, index, isCustom }: { recipe: Recipe; index: number; isCustom?: boolean }) {
+  const displayName = cleanRecipeName(recipe.name)
   const emoji = getRecipeEmoji(recipe)
   const gradient = getRecipeGradient(recipe)
+  const hasImage = !!recipe.imageUrl
 
   return (
     <Link
@@ -238,16 +334,30 @@ function RecipeCard({ recipe, index, isCustom }: { recipe: Recipe; index: number
           我的
         </span>
       )}
-      <div className={`aspect-video bg-gradient-to-br ${gradient.from} ${gradient.to} rounded-xl mb-4 flex items-center justify-center text-7xl group-hover:scale-105 transform transition-transform duration-300 shadow-sm`}>
-        {emoji}
+      <div className={`aspect-video bg-gradient-to-br ${gradient.from} ${gradient.to} rounded-xl mb-4 overflow-hidden flex items-center justify-center relative group-hover:scale-105 transform transition-transform duration-300 shadow-sm`}>
+        {hasImage ? (
+          <img
+            src={recipe.imageUrl}
+            alt={displayName}
+            className="absolute inset-0 w-full h-full object-cover"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              // 图片加载失败时隐藏 img，显示 emoji 兜底
+              ;(e.target as HTMLImageElement).style.display = 'none'
+            }}
+          />
+        ) : null}
+        {/* 无图片或图片加载失败时显示 emoji */}
+        <span className={`text-7xl ${hasImage ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
+          {emoji}
+        </span>
       </div>
-      <h3 className="font-semibold text-neutral-800 mb-2 group-hover:text-primary-600 transition-colors">
-        {recipe.name}
+      <h3 className="font-semibold text-neutral-800 mb-2 group-hover:text-primary-600 transition-colors line-clamp-1" title={displayName}>
+        {displayName}
       </h3>
       <div className="flex flex-wrap gap-2 mb-3">
         <span className="tag">{recipe.category}</span>
-        <span className="tag">{recipe.type}</span>
-        <span className="tag">{recipe.flavor}</span>
       </div>
       <div className="flex items-center gap-4 text-sm text-neutral-500">
         <span className="flex items-center gap-1">
@@ -266,8 +376,10 @@ function RecipeCard({ recipe, index, isCustom }: { recipe: Recipe; index: number
 
 // 列表视图
 function RecipeListItem({ recipe, index, isCustom }: { recipe: Recipe; index: number; isCustom?: boolean }) {
+  const displayName = cleanRecipeName(recipe.name)
   const emoji = getRecipeEmoji(recipe)
   const gradient = getRecipeGradient(recipe)
+  const hasImage = !!recipe.imageUrl
 
   return (
     <Link
@@ -280,17 +392,29 @@ function RecipeListItem({ recipe, index, isCustom }: { recipe: Recipe; index: nu
           我的
         </span>
       )}
-      <div className={`w-24 h-24 bg-gradient-to-br ${gradient.from} ${gradient.to} rounded-xl flex items-center justify-center text-5xl flex-shrink-0 shadow-sm`}>
-        {emoji}
+      <div className={`w-24 h-24 bg-gradient-to-br ${gradient.from} ${gradient.to} rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden shadow-sm relative`}>
+        {hasImage ? (
+          <img
+            src={recipe.imageUrl}
+            alt={displayName}
+            className="absolute inset-0 w-full h-full object-cover"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              ;(e.target as HTMLImageElement).style.display = 'none'
+            }}
+          />
+        ) : null}
+        <span className={`text-5xl ${hasImage ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
+          {emoji}
+        </span>
       </div>
       <div className="flex-1 min-w-0">
-        <h3 className="font-semibold text-neutral-800 mb-2 group-hover:text-primary-600 transition-colors">
-          {recipe.name}
+        <h3 className="font-semibold text-neutral-800 mb-2 group-hover:text-primary-600 transition-colors line-clamp-1" title={displayName}>
+          {displayName}
         </h3>
         <div className="flex flex-wrap gap-2 mb-2">
           <span className="tag">{recipe.category}</span>
-          <span className="tag">{recipe.type}</span>
-          <span className="tag">{recipe.flavor}</span>
         </div>
         <div className="flex items-center gap-4 text-sm text-neutral-500">
           <span>⏱️ {recipe.prepTime + recipe.cookTime}分钟</span>

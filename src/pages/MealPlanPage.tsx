@@ -1,14 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { allRecipes as recipes } from '../data/recipes'
 import { format, addDays } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { checkMissingIngredients } from '../utils/recipeUtils'
 import { getRecipeEmoji } from '../utils/recipeVisuals'
 import { useMealPlanStore } from '../stores/mealPlanStore'
 import { usePantryStore } from '../stores/pantryStore'
-import { Calendar, Plus, Trash2, AlertTriangle, CheckCircle, ChefHat, ShoppingCart, CalendarDays } from 'lucide-react'
+import { Calendar, Plus, Trash2, AlertTriangle, CheckCircle, ChefHat, ShoppingCart, CalendarDays, Loader } from 'lucide-react'
 import type { Recipe } from '../types'
+import { fetchAllRecipes } from '../lib/api'
 
 export default function MealPlanPage() {
   const navigate = useNavigate()
@@ -24,9 +24,22 @@ export default function MealPlanPage() {
   const [showRecipePicker, setShowRecipePicker] = useState(false)
   const [selectedMealType, setSelectedMealType] = useState<'早餐' | '午餐' | '晚餐'>('早餐')
   const [searchQuery, setSearchQuery] = useState('')
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
   const mealTypes: ('早餐' | '午餐' | '晚餐')[] = ['早餐', '午餐', '晚餐']
   const mealIcons = ['🌅', '☀️', '🌙']
+
+  // 从数据库加载菜谱
+  useEffect(() => {
+    async function loadRecipes() {
+      setIsLoading(true)
+      const data = await fetchAllRecipes()
+      setRecipes(data)
+      setIsLoading(false)
+    }
+    loadRecipes()
+  }, [])
 
   const handleAddMeal = (recipe: Recipe) => {
     addPlan({
@@ -48,6 +61,15 @@ export default function MealPlanPage() {
     r.category.includes(searchQuery) ||
     r.type.includes(searchQuery)
   )
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader size={40} className="text-primary-500 animate-spin mb-4" />
+        <p className="text-neutral-500">正在加载...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">

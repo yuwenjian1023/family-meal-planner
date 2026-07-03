@@ -1,12 +1,12 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format, addDays } from 'date-fns'
-import { ShoppingCart, Plus, Trash2, Check, RotateCcw, Sparkles, Calendar, Edit2 } from 'lucide-react'
+import { ShoppingCart, Plus, Trash2, Check, RotateCcw, Sparkles, Calendar, Edit2, Loader } from 'lucide-react'
 import { useShoppingListStore } from '../stores/shoppingListStore'
 import { useMealPlanStore } from '../stores/mealPlanStore'
 import { usePantryStore } from '../stores/pantryStore'
-import { allRecipes } from '../data/recipes'
-import type { ShoppingListItem } from '../types'
+import { fetchAllRecipes } from '../lib/api'
+import type { ShoppingListItem, Recipe } from '../types'
 
 // 食材名称到分类的简易映射
 const INGREDIENT_CATEGORY_MAP: Record<string, string> = {
@@ -45,6 +45,19 @@ export default function ShoppingListPage() {
   const [showGenerateModal, setShowGenerateModal] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [generateDays, setGenerateDays] = useState(7)
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  // 从数据库加载菜谱
+  useEffect(() => {
+    async function loadRecipes() {
+      setIsLoading(true)
+      const data = await fetchAllRecipes()
+      setRecipes(data)
+      setIsLoading(false)
+    }
+    loadRecipes()
+  }, [])
 
   // 新增/编辑表单
   const [formName, setFormName] = useState('')
@@ -92,7 +105,7 @@ export default function ShoppingListPage() {
     // 汇总缺少的食材
     const missingMap = new Map<string, { quantity: number; unit: string }>()
     plannedRecipes.forEach(recipeId => {
-      const recipe = allRecipes.find(r => r.id === recipeId)
+      const recipe = recipes.find(r => r.id === recipeId)
       if (!recipe) return
 
       recipe.ingredients.forEach(ing => {
@@ -176,6 +189,15 @@ export default function ShoppingListPage() {
   const totalUnchecked = uncheckedItems.length
   const totalChecked = checkedItems.length
   const totalCategories = Object.keys(grouped).length
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader size={40} className="text-primary-500 animate-spin mb-4" />
+        <p className="text-neutral-500">正在加载...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">

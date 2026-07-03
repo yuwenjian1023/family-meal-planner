@@ -1,21 +1,46 @@
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Calendar, Refrigerator, BookOpen, Sparkles, ArrowRight, Clock } from 'lucide-react'
-import { allRecipes as recipes } from '../data/recipes'
+import { Calendar, Refrigerator, BookOpen, Sparkles, ArrowRight, Clock, Loader } from 'lucide-react'
 import { recommendRecipes, checkMissingIngredients } from '../utils/recipeUtils'
-import { getRecipeEmoji, getRecipeGradient } from '../utils/recipeVisuals'
+import { getRecipeEmoji, getRecipeGradient, cleanRecipeName } from '../utils/recipeVisuals'
 import { usePantryStore } from '../stores/pantryStore'
 import { useMealPlanStore } from '../stores/mealPlanStore'
+import { Recipe } from '../types'
+import { fetchAllRecipes } from '../lib/api'
 
 export default function HomePage() {
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
   // 从 Zustand store 获取真实库存
   const pantryItemNames = usePantryStore(state => state.getItemNames())
-  
+
   // 今日日期
   const today = new Date().toISOString().split('T')[0]
   const todayPlans = useMealPlanStore(state => state.getPlansForDate(today))
 
+  // 从数据库加载菜谱
+  useEffect(() => {
+    async function loadRecipes() {
+      setIsLoading(true)
+      const data = await fetchAllRecipes()
+      setRecipes(data)
+      setIsLoading(false)
+    }
+    loadRecipes()
+  }, [])
+
   // 获取智能推荐（基于真实库存）
   const recommendedRecipes = recommendRecipes(recipes, pantryItemNames).slice(0, 6)
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader size={40} className="text-primary-500 animate-spin mb-4" />
+        <p className="text-neutral-500">正在加载...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -43,6 +68,39 @@ export default function HomePage() {
         <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-secondary-400/20 rounded-full blur-2xl"></div>
       </div>
 
+      {/* 快捷入口 */}
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Link to="/meal-plan" className="card-interactive flex items-center gap-4">
+          <div className="w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+            <Calendar size={24} />
+          </div>
+          <div>
+            <h3 className="font-semibold text-neutral-800">饮食计划</h3>
+            <p className="text-sm text-neutral-500">规划每周饮食</p>
+          </div>
+        </Link>
+
+        <Link to="/pantry" className="card-interactive flex items-center gap-4">
+          <div className="w-14 h-14 bg-gradient-to-br from-secondary-500 to-secondary-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+            <Refrigerator size={24} />
+          </div>
+          <div>
+            <h3 className="font-semibold text-neutral-800">食材库存</h3>
+            <p className="text-sm text-neutral-500">管理家中食材</p>
+          </div>
+        </Link>
+
+        <Link to="/shopping-list" className="card-interactive flex items-center gap-4">
+          <div className="w-14 h-14 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+            <BookOpen size={24} />
+          </div>
+          <div>
+            <h3 className="font-semibold text-neutral-800">购物清单</h3>
+            <p className="text-sm text-neutral-500">自动生成采购单</p>
+          </div>
+        </Link>
+      </section>
+
       {/* 智能推荐区域 */}
       {recommendedRecipes.length > 0 && (
         <section className="animate-slide-up">
@@ -62,51 +120,62 @@ export default function HomePage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {recommendedRecipes.map((recipe, index) => {
               const missing = checkMissingIngredients(recipe, pantryItemNames)
+              const displayName = cleanRecipeName(recipe.name)
               const emoji = getRecipeEmoji(recipe)
               const gradient = getRecipeGradient(recipe)
+              const hasImage = !!recipe.imageUrl
 
               return (
-                <Link 
-                  key={recipe.id} 
+                <Link
+                  key={recipe.id}
                   to={`/recipes/${recipe.id}`}
                   className="card-interactive group"
                   style={{ animationDelay: `${index * 0.1}s` }}
                 >
-                  {/* 菜品图标区域 */}
-                  <div className={`aspect-video bg-gradient-to-br ${gradient.from} ${gradient.to} rounded-xl mb-4 flex items-center justify-center text-6xl group-hover:scale-105 transform transition-transform duration-300 shadow-sm`}>
-                    {emoji}
+                  {/* 菜品图标区域 - 有图显示图片 */}
+                  <div className={`aspect-video bg-gradient-to-br ${gradient.from} ${gradient.to} rounded-xl mb-4 flex items-center justify-center text-6xl group-hover:scale-105 transform transition-transform duration-300 shadow-sm overflow-hidden relative`}>
+                    {hasImage && (
+                      <img
+                        src={recipe.imageUrl}
+                        alt={displayName}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          ;(e.target as HTMLImageElement).style.display = 'none'
+                        }}
+                      />
+                    )}
+                    <span className={`${hasImage ? 'opacity-0' : ''}`}>{emoji}</span>
                   </div>
-                  
+
                   <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-neutral-800 mb-1 group-hover:text-primary-600 transition-colors">
-                        {recipe.name}
-                      </h3>
-                      <p className="text-sm text-neutral-500">
-                        {recipe.category} · {recipe.type}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1 text-sm text-neutral-400">
+                    <h3 className="font-semibold text-neutral-800 group-hover:text-primary-600 transition-colors line-clamp-1" title={displayName}>
+                      {displayName}
+                    </h3>
+                    <span className="text-xs px-2 py-1 bg-neutral-100 text-neutral-500 rounded-full">
+                      {recipe.category}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-sm text-neutral-500">
+                    <span className="flex items-center gap-1">
                       <Clock size={14} />
                       {recipe.prepTime + recipe.cookTime}分钟
-                    </div>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      👥 {recipe.servings}人份
+                    </span>
                   </div>
-                  
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    <span className="tag">{recipe.flavor}</span>
-                    <span className="tag">{recipe.difficulty}</span>
-                  </div>
-                  
+
                   {missing.length > 0 ? (
-                    <div className="flex items-center gap-2 text-sm text-orange-600 bg-orange-50 rounded-lg px-3 py-2">
-                      <span>⚠️</span>
-                      <span>缺少：{missing.slice(0, 3).join('、')}{missing.length > 3 && '...'}</span>
-                    </div>
+                    <p className="text-xs text-orange-500 mt-3">
+                      ⚠️ 缺少 {missing.length} 种食材
+                    </p>
                   ) : (
-                    <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 rounded-lg px-3 py-2">
-                      <span>✅</span>
-                      <span>食材充足，可以制作</span>
-                    </div>
+                    <p className="text-xs text-green-500 mt-3">
+                      ✅ 食材齐全，可以开做！
+                    </p>
                   )}
                 </Link>
               )
@@ -115,139 +184,50 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* 功能入口 */}
-      <section>
-        <h2 className="section-title mb-6">快速开始</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            {
-              to: '/recipes',
-              icon: BookOpen,
-              title: '浏览菜谱',
-              description: `${recipes.length} 道家常菜`,
-              gradient: 'from-primary-500 to-primary-600',
-            },
-            {
-              to: '/meal-plan',
-              icon: Calendar,
-              title: '饮食计划',
-              description: '安排每日三餐',
-              gradient: 'from-secondary-500 to-secondary-600',
-            },
-            {
-              to: '/pantry',
-              icon: Refrigerator,
-              title: '食材库存',
-              description: '管理家里食材',
-              gradient: 'from-primary-500 to-secondary-500',
-            },
-            {
-              to: '/recipes',
-              icon: Sparkles,
-              title: '智能推荐',
-              description: '根据库存推荐',
-              gradient: 'from-secondary-500 to-primary-500',
-            },
-          ].map((item, index) => (
-            <Link 
-              key={item.to} 
-              to={item.to}
-              className="card-interactive group"
-              style={{ animationDelay: `${index * 0.1}s` }}
-            >
-              <div className="flex flex-col items-center text-center gap-4">
-                <div className={`w-16 h-16 bg-gradient-to-br ${item.gradient} rounded-2xl flex items-center justify-center shadow-lg group-hover:shadow-xl transition-shadow group-hover:scale-110 transform duration-300`}>
-                  <item.icon size={32} className="text-white" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-neutral-800 mb-1">{item.title}</h3>
-                  <p className="text-sm text-neutral-500">{item.description}</p>
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-
       {/* 今日饮食计划预览 */}
-      <section className="card">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="section-title flex items-center gap-2 mb-0">
-            <Calendar size={24} className="text-primary-500" />
-            今日饮食计划
-          </h2>
-          <Link to="/meal-plan" className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1">
-            管理计划
-            <ArrowRight size={16} />
-          </Link>
-        </div>
-        {todayPlans.length > 0 ? (
-          <div className="space-y-3">
-            {['早餐', '午餐', '晚餐'].map((meal, index) => {
-              const plan = todayPlans.find(p => p.mealType === meal)
-              const recipe = plan ? recipes.find(r => r.id === plan.recipeId) : null
-              
+      {todayPlans.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="section-title flex items-center gap-2">
+              <Calendar size={24} className="text-primary-500" />
+              今日饮食
+            </h2>
+            <Link to="/meal-plan" className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1">
+              查看详情
+              <ArrowRight size={16} />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {['早餐', '午餐', '晚餐'].map(mealType => {
+              const plan = todayPlans.find(p => p.mealType === mealType)
+              const recipe = recipes.find(r => r.id === plan?.recipeId)
+              const emoji = recipe ? getRecipeEmoji(recipe) : '🍽️'
+              const displayName = recipe ? cleanRecipeName(recipe.name) : ''
+
               return (
                 <div
-                  key={meal}
-                  className="flex items-center justify-between p-4 bg-gradient-to-r from-primary-50 to-secondary-50 rounded-xl hover:shadow-md transition-all duration-200"
-                  style={{ animationDelay: `${index * 0.1}s` }}
+                  key={mealType}
+                  className={`card ${recipe ? '' : 'border-dashed border-neutral-300'} flex items-center gap-4`}
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm">
-                      <span className="text-2xl">
-                        {meal === '早餐' ? '🌅' : meal === '午餐' ? '☀️' : '🌙'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="font-medium text-neutral-800">{meal}</span>
-                      {recipe ? (
-                        <Link to={`/recipes/${recipe.id}`} className="block text-sm text-primary-500 hover:text-primary-600">
-                          {getRecipeEmoji(recipe)} {recipe.name}
-                        </Link>
-                      ) : (
-                        <p className="text-sm text-neutral-500">点击安排菜品</p>
-                      )}
-                    </div>
+                  <div className="w-12 h-12 bg-gradient-to-br from-primary-100 to-secondary-100 rounded-xl flex items-center justify-center text-2xl">
+                    {emoji}
                   </div>
-                  {recipe ? (
-                    <span className="tag">{recipe.category}</span>
-                  ) : (
-                    <Link to="/meal-plan" className="text-sm text-primary-500 hover:text-primary-600 font-medium">
-                      未安排 →
-                    </Link>
-                  )}
+                  <div className="flex-1">
+                    <div className="text-sm text-neutral-500 mb-1">{mealType}</div>
+                    {recipe ? (
+                      <div className="font-medium text-neutral-800" title={displayName}>{displayName}</div>
+                    ) : (
+                      <Link to="/meal-plan" className="text-primary-600 hover:text-primary-700 text-sm font-medium">
+                        + 添加菜品
+                      </Link>
+                    )}
+                  </div>
                 </div>
               )
             })}
           </div>
-        ) : (
-          <div className="space-y-3">
-            {['早餐', '午餐', '晚餐'].map((meal, index) => (
-              <div
-                key={meal}
-                className="flex items-center justify-between p-4 bg-gradient-to-r from-primary-50 to-secondary-50 rounded-xl hover:shadow-md transition-all duration-200"
-                style={{ animationDelay: `${index * 0.1}s` }}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm">
-                    <span className="text-2xl">
-                      {meal === '早餐' ? '🌅' : meal === '午餐' ? '☀️' : '🌙'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="font-medium text-neutral-800">{meal}</span>
-                    <p className="text-sm text-neutral-500">点击安排菜品</p>
-                  </div>
-                </div>
-                <Link to="/meal-plan" className="text-sm text-primary-500 hover:text-primary-600 font-medium">
-                  未安排 →
-                </Link>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+        </section>
+      )}
     </div>
   )
 }

@@ -10,6 +10,7 @@ import FamilyPage from './pages/FamilyPage'
 import ShoppingListPage from './pages/ShoppingListPage'
 import CustomRecipePage from './pages/CustomRecipePage'
 import WeeklyCalendarPage from './pages/WeeklyCalendarPage'
+import RecipeAdminPage from './pages/RecipeAdminPage'
 import Navbar from './components/Navbar'
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
             <Route path="/shopping-list" element={<ShoppingListPage />} />
             <Route path="/custom-recipe" element={<CustomRecipePage />} />
             <Route path="/weekly" element={<WeeklyCalendarPage />} />
+            <Route path="/recipe-admin" element={<RecipeAdminPage />} />
           </Routes>
         </main>
       </div>

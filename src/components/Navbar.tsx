@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { BookOpen, Calendar, CalendarDays, Refrigerator, Home, ChefHat, Settings, LogIn, Users, ChevronDown, Plus, Copy, Check, ShoppingCart } from 'lucide-react'
+import { BookOpen, Calendar, CalendarDays, Refrigerator, Home, ChefHat, Settings, LogIn, Users, ChevronDown, Plus, Copy, Check, ShoppingCart, Lock } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useFamilyStore } from '../stores/familyStore'
+import { useAdmin } from '../hooks/useAdmin'
 
 export default function Navbar() {
   const location = useLocation()
   const { user } = useAuth()
+  const { isAdmin } = useAdmin()
   const { families, currentFamily, currentFamilyId, setCurrentFamilyId } = useFamilyStore()
   const [showFamilyMenu, setShowFamilyMenu] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -21,6 +23,11 @@ export default function Navbar() {
     { path: '/weekly', icon: CalendarDays, label: '周视图' },
     { path: '/pantry', icon: Refrigerator, label: '食材库存' },
     { path: '/shopping-list', icon: ShoppingCart, label: '购物清单' },
+  ]
+
+  // 管理员专属导航
+  const adminNavItems = [
+    { path: '/recipe-admin', icon: Lock, label: '管理后台' },
   ]
 
   // 点击外部关闭菜单
@@ -70,6 +77,29 @@ export default function Navbar() {
                 <span className="text-sm font-medium hidden sm:inline">{item.label}</span>
               </Link>
             ))}
+
+            {/* 管理员导航 */}
+            {isAdmin && (
+              <>
+                {/* 分隔线 */}
+                <div className="w-px h-6 bg-neutral-200 mx-1 hidden sm:block" />
+
+                {adminNavItems.map((item) => (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-200 ${
+                      isActive(item.path)
+                        ? 'bg-gradient-to-r from-primary-500 to-secondary-500 text-white shadow-md'
+                        : 'text-neutral-600 hover:bg-primary-50 hover:text-primary-600'
+                    }`}
+                  >
+                    <item.icon size={18} />
+                    <span className="text-sm font-medium hidden sm:inline">{item.label}</span>
+                  </Link>
+                ))}
+              </>
+            )}
 
             {/* 分隔线 */}
             <div className="w-px h-6 bg-neutral-200 mx-1 hidden sm:block" />

@@ -1,6 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { allRecipes } from '../data/recipes'
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   addWeeks, subWeeks, isToday, isSameDay
@@ -13,10 +12,11 @@ import { usePantryStore } from '../stores/pantryStore'
 import { useCustomRecipeStore } from '../stores/customRecipeStore'
 import {
   Calendar, ChevronLeft, ChevronRight, Plus, Trash2,
-  AlertTriangle, CheckCircle, ChefHat, ShoppingCart
+  AlertTriangle, CheckCircle, ChefHat, ShoppingCart, Loader
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import type { MealPlan, Recipe, CustomRecipe } from '../types'
+import { fetchAllRecipes } from '../lib/api'
 
 const MEAL_TYPES: ('早餐' | '午餐' | '晚餐')[] = ['早餐', '午餐', '晚餐']
 const MEAL_ICONS = ['🌅', '☀️', '🌙']
@@ -45,6 +45,20 @@ export default function WeeklyCalendarPage() {
   const pantryItemNames = usePantryStore(s => s.getItemNames())
   const customRecipes = useCustomRecipeStore(s => s.recipes)
 
+  // -- Database recipes --
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    async function loadRecipes() {
+      setIsLoading(true)
+      const data = await fetchAllRecipes()
+      setRecipes(data)
+      setIsLoading(false)
+    }
+    loadRecipes()
+  }, [])
+
   // -- Compute week days (Mon → Sun) --
   const weekDays = useMemo(() => {
     const end = endOfWeek(weekStart, { weekStartsOn: 1 })
@@ -60,7 +74,7 @@ export default function WeeklyCalendarPage() {
 
   // -- Helpers --
   function findRecipe(plan: MealPlan): (Recipe | CustomRecipe) | undefined {
-    return allRecipes.find(r => r.id === plan.recipeId) ||
+    return recipes.find(r => r.id === plan.recipeId) ||
       customRecipes.find(r => r.id === plan.recipeId)
   }
 
@@ -107,15 +121,24 @@ export default function WeeklyCalendarPage() {
 
   // -- Recipe filter --
   const filteredRecipes = searchQuery
-    ? allRecipes.filter(r =>
+    ? recipes.filter(r =>
       r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.category.includes(searchQuery) ||
       r.type.includes(searchQuery)
     )
-    : allRecipes
+    : recipes
 
   // -- Empty state --
   const hasAnyPlan = plans.length > 0
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader size={40} className="text-primary-500 animate-spin mb-4" />
+        <p className="text-neutral-500">正在加载...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">

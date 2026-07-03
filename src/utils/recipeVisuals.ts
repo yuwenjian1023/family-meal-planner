@@ -112,3 +112,37 @@ export const typeGradientMap: Record<string, { from: string; to: string }> = {
 export function getRecipeGradient(recipe: Recipe): { from: string; to: string } {
   return typeGradientMap[recipe.type] || { from: 'from-primary-100', to: 'to-secondary-100' }
 }
+
+/**
+ * 获取安全的图片 URL（处理防盗链）
+ * 对于下厨房等第三方 CDN 图片，使用代理服务规避 403
+ * 当前优先使用 referrerPolicy="no-referrer"（已在 img 标签上设置），
+ * 此函数作为兜底方案，如果有图片仍无法加载可切换使用
+ */
+export function getImageUrl(originalUrl: string | undefined): string | undefined {
+  if (!originalUrl) return undefined
+  // 下厨房 CDN 图片通常不需要代理（referrerPolicy 已阻止 Referer），
+  // 如需代理可改为: `https://wsrv.nl/?url=${encodeURIComponent(originalUrl)}`
+  return originalUrl
+}
+
+/**
+ * 清理爬取菜名中的 emoji、装饰符号和多余文字
+ * 用于从下厨房等平台爬取数据的名称清洗
+ */
+export function cleanRecipeName(raw: string): string {
+  let name = raw.trim()
+  // 移除常见前缀噪音（emoji/符号）
+  name = name.replace(/^(✅|✔️|❤️|💖|⭐|🔥|🌟|【|〖)\s*/, '')
+  // 移除藏文装饰符
+  name = name.replace(/[༄༅༆༇༈༉༊་༌།༎༏]/g, '')
+  // 移除全角引号包裹
+  name = name.replace(/[「」『』【】《》〔〕]/g, '')
+  // 移除尾部感叹号组合
+  name = name.replace(/[‼‼️‽⁉!!]+$/, '')
+  // 移除尾部 emoji（2个及以上连续）
+  name = name.replace(/[\U0001F300-\U0001F9FF\U0001FA00-\U0001FA6F\U00002702-\U000027B0\U00002B50-\U00002B55\U0000FE00-\U0000FE0F]{2,}$/g, '')
+  // 移除营销性后缀文字
+  name = name.replace(/(?:超下饭|巨下饭|巨好吃|完胜|附.*?秘诀|米饭杀手|会开火就会做|挑战\d+天.*?不重样第\d+天)[‼!！]*/gi, '')
+  return name.trim() || raw
+}

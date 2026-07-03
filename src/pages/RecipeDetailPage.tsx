@@ -1,27 +1,27 @@
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { allRecipes as recipes } from '../data/recipes'
+import { useState, useEffect } from 'react'
 import { Recipe } from '../types'
-import { Clock, Users, BarChart, ArrowLeft, ChefHat, ShoppingCart, Heart, Edit2, Trash2 } from 'lucide-react'
-import { getRecipeEmoji, getRecipeGradient } from '../utils/recipeVisuals'
+import { Clock, Users, BarChart, ArrowLeft, ChefHat, ShoppingCart, Heart, Edit2, Trash2, Loader } from 'lucide-react'
+import { getRecipeEmoji, getRecipeGradient, cleanRecipeName } from '../utils/recipeVisuals'
 import { useMealPlanStore } from '../stores/mealPlanStore'
 import { useFavoritesStore } from '../stores/favoritesStore'
 import { useCustomRecipeStore } from '../stores/customRecipeStore'
+import { fetchRecipeById } from '../lib/api'
 
 export default function RecipeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [isLoading, setIsLoading] = useState(true)
+  const [dbRecipe, setDbRecipe] = useState<Recipe | null>(null)
 
-  // 先从预设查找，再从自定义查找
-  const presetRecipe = recipes.find(r => r.id === id)
+  // 从自定义查找
   const customRecipe = useCustomRecipeStore(state => state.getById(id || ''))
   const removeCustomRecipe = useCustomRecipeStore(state => state.removeRecipe)
 
   let recipe: Recipe | undefined
   let isCustom = false
 
-  if (presetRecipe) {
-    recipe = presetRecipe
-  } else if (customRecipe) {
+  if (customRecipe) {
     isCustom = true
     recipe = {
       id: customRecipe.id,
@@ -37,11 +37,38 @@ export default function RecipeDetailPage() {
       servings: customRecipe.servings,
       imageUrl: customRecipe.imageUrl,
     }
+  } else if (dbRecipe) {
+    recipe = dbRecipe
   }
 
   // Stores
   const addPlan = useMealPlanStore(state => state.addPlan)
   const { isFavorite, toggleFavorite } = useFavoritesStore()
+
+  // 从数据库加载食谱
+  useEffect(() => {
+    async function loadRecipe() {
+      if (!id) return
+      setIsLoading(true)
+      const data = await fetchRecipeById(id)
+      setDbRecipe(data)
+      setIsLoading(false)
+    }
+    if (!customRecipe) {
+      loadRecipe()
+    } else {
+      setIsLoading(false)
+    }
+  }, [id, customRecipe])
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader size={40} className="text-primary-500 animate-spin mb-4" />
+        <p className="text-neutral-500">正在加载食谱详情...</p>
+      </div>
+    )
+  }
 
   if (!recipe) {
     return (
@@ -55,8 +82,10 @@ export default function RecipeDetailPage() {
     )
   }
 
+  const displayName = cleanRecipeName(recipe.name)
   const emoji = getRecipeEmoji(recipe)
   const gradient = getRecipeGradient(recipe)
+  const hasImage = !!recipe.imageUrl
   const fav = isFavorite(recipe.id)
 
   const handleAddToMealPlan = () => {
@@ -76,8 +105,8 @@ export default function RecipeDetailPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* 返回按钮 */}
-      <button 
-        onClick={() => window.history.back()} 
+      <button
+        onClick={() => window.history.back()}
         className="btn-ghost flex items-center gap-2 hover:translate-x-[-4px] transform transition-transform"
       >
         <ArrowLeft size={18} />
@@ -86,10 +115,21 @@ export default function RecipeDetailPage() {
 
       {/* 主卡片 */}
       <div className="card overflow-hidden">
-        {/* 菜谱封面图 - 使用智能 emoji 和渐变色 */}
+        {/* 菜谱封面图 - 真实图片优先，emoji 兜底 */}
         <div className={`aspect-video bg-gradient-to-br ${gradient.from} ${gradient.to} rounded-xl mb-6 flex items-center justify-center text-[8rem] shadow-lg relative overflow-hidden`}>
+          {hasImage && (
+            <img
+              src={recipe.imageUrl}
+              alt={displayName}
+              className="absolute inset-0 w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                ;(e.target as HTMLImageElement).style.display = 'none'
+              }}
+            />
+          )}
           <div className="absolute inset-0 bg-black/5"></div>
-          <span className="relative z-10 drop-shadow-lg">{emoji}</span>
+          <span className={`relative z-10 drop-shadow-lg ${hasImage ? 'opacity-0' : ''}`} style={{ position: 'relative', zIndex: 10 }}>{emoji}</span>
           {/* 装饰元素 */}
           <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/20 rounded-full blur-2xl"></div>
           <div className="absolute -bottom-10 -left-10 w-24 h-24 bg-black/5 rounded-full blur-2xl"></div>
@@ -99,7 +139,7 @@ export default function RecipeDetailPage() {
         <div className="space-y-6">
           <div>
             <h1 className="text-3xl font-bold text-neutral-800 mb-3 flex items-center gap-3">
-              {recipe.name}
+              {displayName}
               {isCustom && (
                 <span className="px-2.5 py-0.5 bg-primary-100 text-primary-700 text-sm rounded-full font-medium">
                   我的菜谱
@@ -178,8 +218,8 @@ export default function RecipeDetailPage() {
               </h2>
               <div className="space-y-2">
                 {recipe.ingredients.map((ing, idx) => (
-                  <div 
-                    key={idx} 
+                  <div
+                    key={idx}
                     className="flex items-center justify-between p-3 bg-gradient-to-r from-primary-50 to-secondary-50 rounded-lg hover:shadow-sm transition-shadow"
                     style={{ animationDelay: `${idx * 0.05}s` }}
                   >
@@ -205,8 +245,8 @@ export default function RecipeDetailPage() {
               </h2>
               <div className="space-y-3">
                 {recipe.steps.map((step, idx) => (
-                  <div 
-                    key={idx} 
+                  <div
+                    key={idx}
                     className="flex gap-4 p-3 bg-white rounded-lg border border-neutral-200 hover:border-primary-300 hover:shadow-sm transition-all duration-200"
                     style={{ animationDelay: `${idx * 0.05}s` }}
                   >
@@ -224,14 +264,14 @@ export default function RecipeDetailPage() {
 
           {/* 操作按钮 */}
           <div className="flex gap-3 pt-4 border-t border-neutral-200">
-            <button 
+            <button
               onClick={handleAddToMealPlan}
               className="btn-primary flex-1 flex items-center justify-center gap-2"
             >
               <span>➕</span>
               <span>添加到今日饮食计划</span>
             </button>
-            <button 
+            <button
               onClick={() => toggleFavorite(recipe.id)}
               className={`btn-secondary flex items-center justify-center gap-2 ${fav ? 'bg-red-50 text-red-500 border-red-200 hover:bg-red-100' : ''}`}
             >

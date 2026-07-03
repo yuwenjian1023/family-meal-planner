@@ -1,13 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Plus, Trash2, Save, ChefHat, Clock, Users } from 'lucide-react'
 import { useCustomRecipeStore } from '../stores/customRecipeStore'
+import { fetchAllCategories } from '../lib/api'
+import type { RecipeCategory } from '../lib/api'
 import type { Ingredient, CustomRecipeInput } from '../types'
 
-const CATEGORIES = ['家常菜', '川菜', '粤菜', '鲁菜', '苏菜', '浙菜', '湘菜', '徽菜', '闽菜', '京菜', '东北菜', '西北菜', '清真菜']
-const TYPES = ['蔬菜', '肉类', '海鲜', '汤', '蛋类', '豆制品', '主食', '凉菜', '小吃', '甜点']
-const FLAVORS = ['清淡', '麻辣', '酸甜', '咸香', '酸辣', '鲜香', '酱香', '孜然', '五香']
+const FLAVORS = ['清淡', '麻辣', '酸甜', '咸香', '酸辣', '鲜香', '酱香', '孜然', '五香', '蒜香', '咖喱', '甜味']
 const DIFFICULTIES = ['简单', '中等', '困难']
+
+interface CategoryNode {
+  id: string
+  name: string
+  children: CategoryNode[]
+}
 
 export default function CustomRecipePage() {
   const navigate = useNavigate()
@@ -17,8 +23,9 @@ export default function CustomRecipePage() {
   const { addRecipe, updateRecipe, getById } = useCustomRecipeStore()
 
   const [name, setName] = useState('')
-  const [category, setCategory] = useState('家常菜')
-  const [type, setType] = useState('蔬菜')
+  const [category, setCategory] = useState('')        // 一级分类名称
+  const [subcategory, setSubcategory] = useState('')   // 二级分类名称
+  const [subcategoryId, setSubcategoryId] = useState<string | undefined>(undefined)
   const [flavor, setFlavor] = useState('清淡')
   const [difficulty, setDifficulty] = useState<'简单' | '中等' | '困难'>('简单')
   const [prepTime, setPrepTime] = useState(15)
@@ -28,15 +35,46 @@ export default function CustomRecipePage() {
   const [steps, setSteps] = useState<string[]>([''])
   const [saving, setSaving] = useState(false)
 
+  // 分类树
+  const [categoryTree, setCategoryTree] = useState<CategoryNode[]>([])
+  const [loadingCategories, setLoadingCategories] = useState(true)
+
   const isEditing = Boolean(editId)
 
+  // 加载分类数据
+  useEffect(() => {
+    let mounted = true
+    fetchAllCategories().then((cats: RecipeCategory[]) => {
+      if (!mounted) return
+      // 构建树
+      const parents = cats.filter(c => !c.parent_id).sort((a, b) => a.sort_order - b.sort_order)
+      const tree: CategoryNode[] = parents.map(p => ({
+        id: p.id,
+        name: p.name,
+        children: cats
+          .filter(c => c.parent_id === p.id)
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map(c => ({ id: c.id, name: c.name, children: [] })),
+      }))
+      setCategoryTree(tree)
+      setLoadingCategories(false)
+      // 默认选第一个一级分类
+      if (tree.length > 0 && !category) {
+        setCategory(tree[0].name)
+      }
+    })
+    return () => { mounted = false }
+  }, [])
+
+  // 编辑时回填
   useEffect(() => {
     if (editId) {
       const recipe = getById(editId)
       if (recipe) {
         setName(recipe.name)
         setCategory(recipe.category)
-        setType(recipe.type)
+        setSubcategory(recipe.type)
+        setSubcategoryId(recipe.subcategoryId)
         setFlavor(recipe.flavor)
         setDifficulty(recipe.difficulty)
         setPrepTime(recipe.prepTime)
@@ -47,6 +85,26 @@ export default function CustomRecipePage() {
       }
     }
   }, [editId])
+
+  // 当前一级分类下的二级分类列表
+  const currentChildren = useMemo(() => {
+    const parent = categoryTree.find(p => p.name === category)
+    return parent?.children || []
+  }, [categoryTree, category])
+
+  // 切换一级分类时，自动选第一个二级分类
+  useEffect(() => {
+    if (currentChildren.length > 0 && !currentChildren.some(c => c.name === subcategory)) {
+      setSubcategory(currentChildren[0].name)
+      setSubcategoryId(currentChildren[0].id)
+    }
+  }, [currentChildren, subcategory])
+
+  const handleSubcategoryChange = (childName: string) => {
+    setSubcategory(childName)
+    const child = currentChildren.find(c => c.name === childName)
+    setSubcategoryId(child?.id)
+  }
 
   const addIngredient = () => {
     setIngredients([...ingredients, { name: '', amount: 0, unit: '克' }])
@@ -84,8 +142,8 @@ export default function CustomRecipePage() {
 
     const input: CustomRecipeInput = {
       name: name.trim(),
-      category,
-      type,
+      category,       // 一级分类
+      type: subcategory, // 二级分类
       flavor,
       difficulty,
       prepTime,
@@ -93,6 +151,7 @@ export default function CustomRecipePage() {
       servings,
       ingredients: validIngredients,
       steps: validSteps,
+      subcategoryId,
     }
 
     if (isEditing && editId) {
@@ -140,37 +199,47 @@ export default function CustomRecipePage() {
             />
           </div>
 
-          {/* 分类行 */}
+          {/* 分类行 - 级联选择器 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block mb-1 text-sm font-medium text-neutral-600">一级分类</label>
+              {loadingCategories ? (
+                <div className="input-field text-neutral-400">加载中...</div>
+              ) : (
+                <select
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                  className="input-field"
+                >
+                  {categoryTree.map(c => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <label className="block mb-1 text-sm font-medium text-neutral-600">二级分类</label>
+              <select
+                value={subcategory}
+                onChange={e => handleSubcategoryChange(e.target.value)}
+                className="input-field"
+                disabled={currentChildren.length === 0}
+              >
+                {currentChildren.length === 0 && <option value="">暂无</option>}
+                {currentChildren.map(c => (
+                  <option key={c.id} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* 口味行 */}
           <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block mb-1 text-sm font-medium text-neutral-600">菜系</label>
-              <select value={category} onChange={e => setCategory(e.target.value)} className="input-field">
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block mb-1 text-sm font-medium text-neutral-600">种类</label>
-              <select value={type} onChange={e => setType(e.target.value)} className="input-field">
-                {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
             <div>
               <label className="block mb-1 text-sm font-medium text-neutral-600">口味</label>
               <select value={flavor} onChange={e => setFlavor(e.target.value)} className="input-field">
                 {FLAVORS.map(f => <option key={f} value={f}>{f}</option>)}
               </select>
-            </div>
-          </div>
-
-          {/* 参数行 */}
-          <div className="grid grid-cols-4 gap-3">
-            <div>
-              <label className="block mb-1 text-sm font-medium text-neutral-600">准备 (分)</label>
-              <input type="number" value={prepTime} onChange={e => setPrepTime(Number(e.target.value) || 0)} min={0} className="input-field" />
-            </div>
-            <div>
-              <label className="block mb-1 text-sm font-medium text-neutral-600">烹饪 (分)</label>
-              <input type="number" value={cookTime} onChange={e => setCookTime(Number(e.target.value) || 0)} min={0} className="input-field" />
             </div>
             <div>
               <label className="block mb-1 text-sm font-medium text-neutral-600">难度</label>
@@ -181,6 +250,18 @@ export default function CustomRecipePage() {
             <div>
               <label className="block mb-1 text-sm font-medium text-neutral-600">份量</label>
               <input type="number" value={servings} onChange={e => setServings(Number(e.target.value) || 1)} min={1} className="input-field" />
+            </div>
+          </div>
+
+          {/* 时间行 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block mb-1 text-sm font-medium text-neutral-600">准备时间 (分)</label>
+              <input type="number" value={prepTime} onChange={e => setPrepTime(Number(e.target.value) || 0)} min={0} className="input-field" />
+            </div>
+            <div>
+              <label className="block mb-1 text-sm font-medium text-neutral-600">烹饪时间 (分)</label>
+              <input type="number" value={cookTime} onChange={e => setCookTime(Number(e.target.value) || 0)} min={0} className="input-field" />
             </div>
           </div>
 
